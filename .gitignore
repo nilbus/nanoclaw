@@ -9,7 +9,9 @@ dist/
 # Local data & auth
 store/
 data/
+data/env/
 logs/
+projects/
 
 # Groups - per-installation state, not tracked
 groups/*
@@ -24,6 +26,8 @@ groups/*
 *.keys.json
 .env
 .env*
+.telegram.api-key
+.github-saddle-view-build.token
 
 # Temp files
 .tmp-*

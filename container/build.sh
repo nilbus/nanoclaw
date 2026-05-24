@@ -19,7 +19,8 @@ cd "$SCRIPT_DIR"
 source "$PROJECT_ROOT/setup/lib/install-slug.sh"
 IMAGE_NAME="$(container_image_base)"
 TAG="${1:-latest}"
-CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
+CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-container}"
+CONTAINER_DNS="${CONTAINER_DNS:-8.8.8.8}"
 
 # Caller's env takes precedence; fall back to .env.
 if [ -z "${INSTALL_CJK_FONTS:-}" ] && [ -f "../.env" ]; then
@@ -27,6 +28,9 @@ if [ -z "${INSTALL_CJK_FONTS:-}" ] && [ -f "../.env" ]; then
 fi
 
 BUILD_ARGS=()
+if [ "${CONTAINER_RUNTIME}" = "container" ] && [ -n "${CONTAINER_DNS}" ]; then
+    BUILD_ARGS+=(--dns "${CONTAINER_DNS}")
+fi
 if [ "${INSTALL_CJK_FONTS:-false}" = "true" ]; then
     echo "CJK fonts: enabled (adds ~200MB)"
     BUILD_ARGS+=(--build-arg INSTALL_CJK_FONTS=true)

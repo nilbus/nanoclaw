@@ -9,7 +9,8 @@ import { CONTAINER_INSTALL_LABEL } from './config.js';
 import { log } from './log.js';
 
 /** The container runtime binary name. */
-export const CONTAINER_RUNTIME_BIN = 'docker';
+export const CONTAINER_RUNTIME_BIN = 'container';
+export const CONTAINER_DNS_SERVER = process.env.CONTAINER_DNS || '8.8.8.8';
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
@@ -20,9 +21,14 @@ export function hostGatewayArgs(): string[] {
   return [];
 }
 
+/** CLI args for DNS when Apple Container's default embedded resolver is unavailable. */
+export function dnsArgs(): string[] {
+  return CONTAINER_DNS_SERVER ? ['--dns', CONTAINER_DNS_SERVER] : [];
+}
+
 /** Returns CLI args for a readonly bind mount. */
 export function readonlyMountArgs(hostPath: string, containerPath: string): string[] {
-  return ['-v', `${hostPath}:${containerPath}:ro`];
+  return ['--mount', `type=bind,source=${hostPath},target=${containerPath},readonly`];
 }
 
 /** Stop a container by name. Uses execFileSync to avoid shell injection. */
@@ -30,25 +36,35 @@ export function stopContainer(name: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
     throw new Error(`Invalid container name: ${name}`);
   }
-  execSync(`${CONTAINER_RUNTIME_BIN} stop -t 1 ${name}`, { stdio: 'pipe' });
+  execSync(`${CONTAINER_RUNTIME_BIN} stop ${name}`, { stdio: 'pipe' });
 }
 
 /** Ensure the container runtime is running, starting it if needed. */
 export function ensureContainerRuntimeRunning(): void {
   try {
-    execSync(`${CONTAINER_RUNTIME_BIN} info`, {
+    execSync(`${CONTAINER_RUNTIME_BIN} system status`, {
       stdio: 'pipe',
       timeout: 10000,
     });
     log.debug('Container runtime already running');
   } catch (err) {
-    log.error('Failed to reach container runtime', { err });
+    log.info('Starting Apple Container runtime');
+    try {
+      execSync(`${CONTAINER_RUNTIME_BIN} system start`, {
+        stdio: 'pipe',
+        timeout: 30000,
+      });
+      log.info('Container runtime started');
+      return;
+    } catch (startErr) {
+      log.error('Failed to reach container runtime', { err: startErr });
+    }
     console.error('\n╔════════════════════════════════════════════════════════════════╗');
     console.error('║  FATAL: Container runtime failed to start                      ║');
     console.error('║                                                                ║');
     console.error('║  Agents cannot run without a container runtime. To fix:        ║');
-    console.error('║  1. Ensure Docker is installed and running                     ║');
-    console.error('║  2. Run: docker info                                           ║');
+    console.error('║  1. Ensure Apple Container is installed and running            ║');
+    console.error('║  2. Run: container system start                                ║');
     console.error('║  3. Restart NanoClaw                                           ║');
     console.error('╚════════════════════════════════════════════════════════════════╝\n');
     throw new Error('Container runtime is required but failed to start', {
@@ -66,14 +82,25 @@ export function ensureContainerRuntimeRunning(): void {
  */
 export function cleanupOrphans(): void {
   try {
-    const output = execSync(
-      `${CONTAINER_RUNTIME_BIN} ps --filter label=${CONTAINER_INSTALL_LABEL} --format '{{.Names}}'`,
-      {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        encoding: 'utf-8',
-      },
-    );
-    const orphans = output.trim().split('\n').filter(Boolean);
+    const output = execSync(`${CONTAINER_RUNTIME_BIN} ls --format json`, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+    });
+    const containers = JSON.parse(output || '[]') as Array<{
+      status?: string;
+      configuration?: {
+        id?: string;
+        labels?: Record<string, string>;
+      };
+    }>;
+    const [labelKey, labelValue] = CONTAINER_INSTALL_LABEL.split('=');
+    const orphans = containers
+      .filter((container) => {
+        const labels = container.configuration?.labels ?? {};
+        return container.status === 'running' && labels[labelKey] === labelValue;
+      })
+      .map((container) => container.configuration?.id)
+      .filter((name): name is string => Boolean(name));
     for (const name of orphans) {
       try {
         stopContainer(name);

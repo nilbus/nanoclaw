@@ -22,7 +22,7 @@ import {
 import { materializeContainerJson } from './container-config.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { updateContainerConfigScalars, updateContainerConfigJson } from './db/container-configs.js';
-import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import { CONTAINER_RUNTIME_BIN, dnsArgs, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -68,6 +68,13 @@ export function getActiveContainerCount(): number {
 
 export function isContainerRunning(sessionId: string): boolean {
   return activeContainers.has(sessionId);
+}
+
+function supportsReadonlyFileMounts(): boolean {
+  // Apple Container's bind mounts require directory sources. Files that
+  // already live inside a mounted directory are still readable; they just
+  // cannot be over-mounted read-only the way Docker permits.
+  return CONTAINER_RUNTIME_BIN !== 'container';
 }
 
 /**
@@ -273,7 +280,7 @@ function buildMounts(
   // container.json — nested RO mount on top of RW group dir so the agent
   // can read its config but cannot modify it.
   const containerJsonPath = path.join(groupDir, 'container.json');
-  if (fs.existsSync(containerJsonPath)) {
+  if (supportsReadonlyFileMounts() && fs.existsSync(containerJsonPath)) {
     mounts.push({ hostPath: containerJsonPath, containerPath: '/workspace/agent/container.json', readonly: true });
   }
 
@@ -285,7 +292,7 @@ function buildMounts(
   // already RO-mounted, so writes through it fail regardless — no need for
   // a nested mount there.
   const composedClaudeMd = path.join(groupDir, 'CLAUDE.md');
-  if (fs.existsSync(composedClaudeMd)) {
+  if (supportsReadonlyFileMounts() && fs.existsSync(composedClaudeMd)) {
     mounts.push({ hostPath: composedClaudeMd, containerPath: '/workspace/agent/CLAUDE.md', readonly: true });
   }
   const fragmentsDir = path.join(groupDir, '.claude-fragments');
@@ -302,7 +309,7 @@ function buildMounts(
   // Shared CLAUDE.md — read-only, imported by the composed entry point via
   // the `.claude-shared.md` symlink inside the group dir.
   const sharedClaudeMd = path.join(process.cwd(), 'container', 'CLAUDE.md');
-  if (fs.existsSync(sharedClaudeMd)) {
+  if (supportsReadonlyFileMounts() && fs.existsSync(sharedClaudeMd)) {
     mounts.push({ hostPath: sharedClaudeMd, containerPath: '/app/CLAUDE.md', readonly: true });
   }
 
@@ -423,17 +430,23 @@ async function buildContainerArgs(
   // a transient hard failure: if we can't wire the gateway, we don't spawn.
   // The caller (router or host-sweep) catches the throw, leaves the inbound
   // message pending, and the next sweep tick retries.
-  if (agentIdentifier) {
+  const skipOneCli = provider === 'codex';
+  if (!skipOneCli && agentIdentifier) {
     await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
   }
-  const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-  if (!onecliApplied) {
-    throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
+  if (!skipOneCli) {
+    const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
+    if (!onecliApplied) {
+      throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
+    }
+    log.info('OneCLI gateway applied', { containerName });
+  } else {
+    log.info('Skipping OneCLI gateway for Codex provider', { containerName });
   }
-  log.info('OneCLI gateway applied', { containerName });
 
   // Host gateway
   args.push(...hostGatewayArgs());
+  args.push(...dnsArgs());
 
   // User mapping
   const hostUid = process.getuid?.();
@@ -452,14 +465,9 @@ async function buildContainerArgs(
     }
   }
 
-  // Override entrypoint: run v2 entry point directly via Bun (no tsc, no stdin).
-  args.push('--entrypoint', 'bash');
-
   // Use per-agent-group image if one has been built, otherwise base image
   const imageTag = containerConfig.imageTag || CONTAINER_IMAGE;
   args.push(imageTag);
-
-  args.push('-c', 'exec bun run /app/src/index.ts');
 
   return args;
 }

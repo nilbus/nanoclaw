@@ -146,8 +146,7 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
  *     memory; after the first spawn regenerates `CLAUDE.md`, this branch
  *     is skipped because `CLAUDE.local.md` now exists)
  *
- * Globally:
- *   - delete `groups/global/` (content already in `container/CLAUDE.md`)
+ * `groups/global/` is preserved because upstream tracks it as sample state.
  */
 export function migrateGroupsToClaudeLocal(): void {
   if (!fs.existsSync(GROUPS_DIR)) return;
@@ -175,12 +174,6 @@ export function migrateGroupsToClaudeLocal(): void {
       fs.renameSync(claudeMd, claudeLocal);
       actions.push(`${entry.name}/CLAUDE.md → CLAUDE.local.md`);
     }
-  }
-
-  const globalDir = path.join(GROUPS_DIR, 'global');
-  if (fs.existsSync(globalDir)) {
-    fs.rmSync(globalDir, { recursive: true, force: true });
-    actions.push('groups/global/ removed');
   }
 
   if (actions.length > 0) {

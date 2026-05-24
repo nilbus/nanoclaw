@@ -20,6 +20,7 @@ ARG INSTALL_CJK_FONTS=false
 # mean every rebuild silently picks up the latest and can break in lockstep
 # across all users.
 ARG CLAUDE_CODE_VERSION=2.1.128
+ARG CODEX_VERSION=0.124.0
 ARG AGENT_BROWSER_VERSION=latest
 ARG VERCEL_VERSION=52.2.1
 ARG BUN_VERSION=1.3.12
@@ -49,6 +50,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         ca-certificates \
         curl \
         git \
+        libnss-wrapper \
+        openssh-client \
         tini \
         unzip \
     && if [ "$INSTALL_CJK_FONTS" = "true" ]; then \
@@ -110,10 +113,17 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
+RUN --mount=type=cache,target=/root/.cache/pnpm \
+    pnpm install -g "@openai/codex@${CODEX_VERSION}"
+
 # ---- ncl CLI wrapper ----------------------------------------------------------
 # Actual script lives in the mounted source at /app/src/cli/ncl.ts.
 RUN printf '#!/bin/sh\nexec bun /app/src/cli/ncl.ts "$@"\n' > /usr/local/bin/ncl && \
     chmod +x /usr/local/bin/ncl
+
+# Shared group instructions are copied into the image because Apple Container
+# cannot bind-mount individual files.
+COPY CLAUDE.md /app/CLAUDE.md
 
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh

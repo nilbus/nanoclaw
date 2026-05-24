@@ -19,6 +19,7 @@ vi.mock('child_process', () => ({
 
 import {
   CONTAINER_RUNTIME_BIN,
+  dnsArgs,
   readonlyMountArgs,
   stopContainer,
   ensureContainerRuntimeRunning,
@@ -34,16 +35,22 @@ beforeEach(() => {
 // --- Pure functions ---
 
 describe('readonlyMountArgs', () => {
-  it('returns -v flag with :ro suffix', () => {
+  it('returns Apple Container readonly bind mount args', () => {
     const args = readonlyMountArgs('/host/path', '/container/path');
-    expect(args).toEqual(['-v', '/host/path:/container/path:ro']);
+    expect(args).toEqual(['--mount', 'type=bind,source=/host/path,target=/container/path,readonly']);
+  });
+});
+
+describe('dnsArgs', () => {
+  it('returns explicit DNS args for Apple Container', () => {
+    expect(dnsArgs()).toEqual(['--dns', '8.8.8.8']);
   });
 });
 
 describe('stopContainer', () => {
-  it('calls docker stop for valid container names', () => {
+  it('calls container stop for valid container names', () => {
     stopContainer('nanoclaw-test-123');
-    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} stop -t 1 nanoclaw-test-123`, {
+    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} stop nanoclaw-test-123`, {
       stdio: 'pipe',
     });
   });
@@ -65,16 +72,32 @@ describe('ensureContainerRuntimeRunning', () => {
     ensureContainerRuntimeRunning();
 
     expect(mockExecSync).toHaveBeenCalledTimes(1);
-    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} info`, {
+    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} system status`, {
       stdio: 'pipe',
       timeout: 10000,
     });
     expect(log.debug).toHaveBeenCalledWith('Container runtime already running');
   });
 
-  it('throws when docker info fails', () => {
+  it('starts the runtime when status fails', () => {
     mockExecSync.mockImplementationOnce(() => {
-      throw new Error('Cannot connect to the Docker daemon');
+      throw new Error('not running');
+    });
+    mockExecSync.mockReturnValueOnce('');
+
+    ensureContainerRuntimeRunning();
+
+    expect(mockExecSync).toHaveBeenCalledTimes(2);
+    expect(mockExecSync).toHaveBeenNthCalledWith(2, `${CONTAINER_RUNTIME_BIN} system start`, {
+      stdio: 'pipe',
+      timeout: 30000,
+    });
+    expect(log.info).toHaveBeenCalledWith('Container runtime started');
+  });
+
+  it('throws when runtime start fails', () => {
+    mockExecSync.mockImplementation(() => {
+      throw new Error('Cannot connect to Apple Container');
     });
 
     expect(() => ensureContainerRuntimeRunning()).toThrow('Container runtime is required but failed to start');
@@ -85,41 +108,41 @@ describe('ensureContainerRuntimeRunning', () => {
 // --- cleanupOrphans ---
 
 describe('cleanupOrphans', () => {
-  it('filters ps by the install label so peers are not reaped', () => {
-    mockExecSync.mockReturnValueOnce('');
-
-    cleanupOrphans();
-
-    expect(mockExecSync).toHaveBeenCalledWith(
-      `${CONTAINER_RUNTIME_BIN} ps --filter label=${CONTAINER_INSTALL_LABEL} --format '{{.Names}}'`,
-      expect.any(Object),
+  it('stops orphaned containers scoped to this install label', () => {
+    mockExecSync.mockReturnValueOnce(
+      JSON.stringify([
+        {
+          status: 'running',
+          configuration: { id: 'nanoclaw-group1-111', labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] } },
+        },
+        {
+          status: 'running',
+          configuration: { id: 'other-install-222', labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: 'other' } },
+        },
+        {
+          status: 'stopped',
+          configuration: { id: 'nanoclaw-group2-333', labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] } },
+        },
+      ]),
     );
-  });
-
-  it('stops orphaned nanoclaw containers', () => {
-    // docker ps returns container names, one per line
-    mockExecSync.mockReturnValueOnce('nanoclaw-group1-111\nnanoclaw-group2-222\n');
     // stop calls succeed
     mockExecSync.mockReturnValue('');
 
     cleanupOrphans();
 
-    // ps + 2 stop calls
-    expect(mockExecSync).toHaveBeenCalledTimes(3);
-    expect(mockExecSync).toHaveBeenNthCalledWith(2, `${CONTAINER_RUNTIME_BIN} stop -t 1 nanoclaw-group1-111`, {
-      stdio: 'pipe',
-    });
-    expect(mockExecSync).toHaveBeenNthCalledWith(3, `${CONTAINER_RUNTIME_BIN} stop -t 1 nanoclaw-group2-222`, {
+    // ls + 1 stop call
+    expect(mockExecSync).toHaveBeenCalledTimes(2);
+    expect(mockExecSync).toHaveBeenNthCalledWith(2, `${CONTAINER_RUNTIME_BIN} stop nanoclaw-group1-111`, {
       stdio: 'pipe',
     });
     expect(log.info).toHaveBeenCalledWith('Stopped orphaned containers', {
-      count: 2,
-      names: ['nanoclaw-group1-111', 'nanoclaw-group2-222'],
+      count: 1,
+      names: ['nanoclaw-group1-111'],
     });
   });
 
   it('does nothing when no orphans exist', () => {
-    mockExecSync.mockReturnValueOnce('');
+    mockExecSync.mockReturnValueOnce('[]');
 
     cleanupOrphans();
 
@@ -129,7 +152,7 @@ describe('cleanupOrphans', () => {
 
   it('warns and continues when ps fails', () => {
     mockExecSync.mockImplementationOnce(() => {
-      throw new Error('docker not available');
+      throw new Error('container not available');
     });
 
     cleanupOrphans(); // should not throw
@@ -141,7 +164,18 @@ describe('cleanupOrphans', () => {
   });
 
   it('continues stopping remaining containers when one stop fails', () => {
-    mockExecSync.mockReturnValueOnce('nanoclaw-a-1\nnanoclaw-b-2\n');
+    mockExecSync.mockReturnValueOnce(
+      JSON.stringify([
+        {
+          status: 'running',
+          configuration: { id: 'nanoclaw-a-1', labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] } },
+        },
+        {
+          status: 'running',
+          configuration: { id: 'nanoclaw-b-2', labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] } },
+        },
+      ]),
+    );
     // First stop fails
     mockExecSync.mockImplementationOnce(() => {
       throw new Error('already stopped');
