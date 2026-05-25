@@ -25,4 +25,6 @@ fi
 
 git add -A
 git commit -m "$msg"
-git push --force-with-lease
+if ! git push --force-with-lease; then
+  echo "push failed; commit remains local"
+fi
