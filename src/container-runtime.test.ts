@@ -113,7 +113,10 @@ describe('cleanupOrphans', () => {
       JSON.stringify([
         {
           status: 'running',
-          configuration: { id: 'nanoclaw-group1-111', labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] } },
+          configuration: {
+            id: 'nanoclaw-group1-111',
+            labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] },
+          },
         },
         {
           status: 'running',
@@ -121,7 +124,10 @@ describe('cleanupOrphans', () => {
         },
         {
           status: 'stopped',
-          configuration: { id: 'nanoclaw-group2-333', labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] } },
+          configuration: {
+            id: 'nanoclaw-group2-333',
+            labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] },
+          },
         },
       ]),
     );
@@ -168,11 +174,17 @@ describe('cleanupOrphans', () => {
       JSON.stringify([
         {
           status: 'running',
-          configuration: { id: 'nanoclaw-a-1', labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] } },
+          configuration: {
+            id: 'nanoclaw-a-1',
+            labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] },
+          },
         },
         {
           status: 'running',
-          configuration: { id: 'nanoclaw-b-2', labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] } },
+          configuration: {
+            id: 'nanoclaw-b-2',
+            labels: { [CONTAINER_INSTALL_LABEL.split('=')[0]]: CONTAINER_INSTALL_LABEL.split('=')[1] },
+          },
         },
       ]),
     );

@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc '\"$(git rev-parse --show-toplevel)/.codex/hooks/git-commit-push.sh\"'",
+            "timeout": 300,
+            "statusMessage": "Committing and pushing repo changes"
+          }
+        ]
+      }
+    ]
+  }
+}

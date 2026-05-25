@@ -1,0 +1,1 @@
+../../.agents/hooks/git-commit-push.sh
