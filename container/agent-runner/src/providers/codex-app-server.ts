@@ -337,6 +337,7 @@ export interface TurnParams {
   threadId: string;
   inputText: string;
   model?: string;
+  effort?: string;
   cwd?: string;
 }
 
@@ -345,6 +346,7 @@ export async function startCodexTurn(server: AppServer, params: TurnParams): Pro
     threadId: params.threadId,
     input: [{ type: 'text', text: params.inputText }],
     model: params.model,
+    effort: params.effort,
     cwd: params.cwd,
   });
   if (resp.error) throw new Error(`turn/start failed: ${resp.error.message}`);
