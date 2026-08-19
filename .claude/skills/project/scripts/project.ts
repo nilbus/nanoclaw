@@ -20,7 +20,7 @@ type Allowlist = {
 };
 
 type Options = {
-  directory: string;
+  projectName: string;
   instructions: string | null;
   instructionsProvided: boolean;
   dryRun: boolean;
@@ -55,7 +55,7 @@ function fail(message: string): never {
 function printUsage(): void {
   console.error(
     [
-      'Usage: project.ts --dir <host-directory> [--instructions <text> | --instructions-file <file>] [--dry-run]',
+      'Usage: project.ts --project <project-name> [--instructions <text> | --instructions-file <file>] [--dry-run]',
       '',
       "The absence of an instructions flag clears Phoebe's existing project instructions.",
     ].join('\n'),
@@ -63,7 +63,7 @@ function printUsage(): void {
 }
 
 function parseOptions(argv: string[]): Options {
-  let directory: string | undefined;
+  let projectName: string | undefined;
   let instructions: string | null = null;
   let instructionsProvided = false;
   let instructionsFile: string | undefined;
@@ -79,9 +79,9 @@ function parseOptions(argv: string[]): Options {
       dryRun = true;
       continue;
     }
-    if (arg === '--dir' || arg === '--directory') {
-      directory = argv[++i];
-      if (!directory) fail(`${arg} requires a value`);
+    if (arg === '--project') {
+      projectName = argv[++i];
+      if (!projectName) fail(`${arg} requires a value`);
       continue;
     }
     if (arg === '--instructions') {
@@ -101,12 +101,12 @@ function parseOptions(argv: string[]): Options {
     fail(`Unknown argument: ${arg}`);
   }
 
-  if (!directory) fail('--dir is required');
+  if (!projectName) fail('--project is required');
   if (instructionsFile !== undefined) {
     instructions = fs.readFileSync(resolveHostPath(instructionsFile), 'utf8');
   }
 
-  return { directory, instructions, instructionsProvided, dryRun };
+  return { projectName, instructions, instructionsProvided, dryRun };
 }
 
 function expandHome(input: string): string {
@@ -118,6 +118,16 @@ function expandHome(input: string): string {
 function resolveHostPath(input: string): string {
   const expanded = expandHome(input);
   return path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(nanoClawRoot, expanded);
+}
+
+function resolveProjectDirectory(projectName: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(projectName)) {
+    fail(
+      `Invalid project name "${projectName}". Use a single directory name with letters, digits, dots, underscores, or hyphens.`,
+    );
+  }
+
+  return path.join(nanoClawRoot, 'projects', projectName);
 }
 
 function isPathInside(parent: string, child: string): boolean {
@@ -243,7 +253,7 @@ function restartPhoebe(agentGroupId: string): { attempted: boolean; succeeded: b
 
 function main(): void {
   const options = parseOptions(process.argv.slice(2));
-  const requestedDirectory = resolveHostPath(options.directory);
+  const requestedDirectory = resolveProjectDirectory(options.projectName);
   const rootDirectory = path.parse(requestedDirectory).root;
   const homeDirectory = path.resolve(os.homedir());
   if (requestedDirectory === rootDirectory || requestedDirectory === homeDirectory) {
@@ -267,6 +277,7 @@ function main(): void {
       JSON.stringify(
         {
           dryRun: true,
+          project: options.projectName,
           directory: realDirectory,
           createdDirectory,
           instructions: options.instructionsProvided ? 'replace' : 'clear',
@@ -326,6 +337,7 @@ function main(): void {
           {
             groupId: group.id,
             group: group.name,
+            project: options.projectName,
             directory: realDirectory,
             createdDirectory,
             instructions: options.instructionsProvided ? 'replaced' : 'cleared',
